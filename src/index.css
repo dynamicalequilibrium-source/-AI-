@@ -1,0 +1,9 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&family=Do+Hyeon&family=Jua&family=Inter:wght@400;500;600;700;800&display=swap');
+@import url('https://cdn.jsdelivr.net/gh/sunnyside/SUITE/fonts/static/woff2/SUITE.css');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "SUITE", "Noto Sans KR", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-dohyeon: "SUITE", "Do Hyeon", sans-serif;
+  --font-jua: "SUITE", "Jua", sans-serif;
+}
