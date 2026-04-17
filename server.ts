@@ -123,41 +123,48 @@ async function startServer() {
 
   function buildTable(lines: string[]): string {
     const rows = lines
-      .filter(line => !line.match(/^\|[-: |]+\|$/)) 
-      .map(line => line.split('|').filter(cell => cell !== '').map(c => c.trim()));
+      .filter(line => !line.trim().match(/^\|?[-: |]+\|?$/)) 
+      .map(line => {
+        let trimmed = line.trim();
+        if (trimmed.startsWith('|')) trimmed = trimmed.substring(1);
+        if (trimmed.endsWith('|')) trimmed = trimmed.substring(0, trimmed.length - 1);
+        return trimmed.split('|').map(c => c.trim());
+      });
 
     if (rows.length === 0) return '';
 
-    const colCount = rows[0].length;
+    const colCount = Math.max(...rows.map(r => r.length));
     const colWidth = Math.floor(40000 / colCount); 
     const tableId = Math.floor(Math.random() * 10000) + 1; 
 
-    // 표(<hp:tbl>)를 문단(<hp:p>) 바로 아래에 위치 (HWPX 규격 준수)
+    // RHWP 및 Hancom Office 호환성을 위해 hp:tbl은 hp:p > hp:run > hp:ctrl 내부에 들어가는 경우가 많음
     let xml = `    <hp:p paraPrIDRef="0">\n`;
-    
-    // 속성값 대소문자 및 필수 속성 위주로 재정리
-    xml += `        <hp:tbl id="${tableId}" zOrder="0" numberingType="Table" textWrap="TopAndBottom" halfTextWrap="false" textFlow="BothSides" lock="false" dropCapStyle="None">\n`;
-    xml += `          <hp:sz width="${colWidth * colCount}" widthRelTo="Paper" height="2000" heightRelTo="Absolute" protect="false"/>\n`;
-    xml += `          <hp:pos treatAsChar="true" affectLSpacing="false" flowWithText="true" allowOverlap="false" holdAnchorAndSO="false" vertRelTo="Paragraph" horzRelTo="Column" vertAlign="Top" horzAlign="Center" vertOffset="0" horzOffset="0"/>\n`;
-    xml += `          <hp:outMargin left="0" right="0" top="0" bottom="0"/>\n`;
-    xml += `          <hp:shapeComment/>\n`;
-    xml += `          <hp:inMargin left="141" right="141" top="141" bottom="141"/>\n`;
+    xml += `      <hp:run charPrIDRef="0">\n`;
+    xml += `        <hp:ctrl>\n`;
+    xml += `          <hp:tbl id="${tableId}" zOrder="0" numberingType="Table" textWrap="TopAndBottom" textFlow="BothSides" lock="false" dropCapStyle="None">\n`;
+    xml += `            <hp:sz width="40000" widthRelTo="Paper" height="2000" heightRelTo="Absolute" protect="false"/>\n`;
+    xml += `            <hp:pos treatAsChar="true" affectLSpacing="false" flowWithText="true" allowOverlap="false" holdAnchorAndSO="false" vertRelTo="Paragraph" horzRelTo="Column" vertAlign="Top" horzAlign="Center" vertOffset="0" horzOffset="0"/>\n`;
+    xml += `            <hp:outMargin left="0" right="0" top="0" bottom="0"/>\n`;
+    xml += `            <hp:shapeComment/>\n`;
+    xml += `            <hp:inMargin left="141" right="141" top="141" bottom="141"/>\n`;
 
     for (let r = 0; r < rows.length; r++) {
-      xml += `          <hp:tr>\n`;
-      for (let c = 0; c < rows[r].length; c++) {
-        const cellText = escapeXml(rows[r][c]);
-        // borderFillIDRef="2"를 "1"로 수정
-        xml += `            <hp:tc borderFillIDRef="1" colSpan="1" rowSpan="1" colAddr="${c}" rowAddr="${r}" width="${colWidth}" height="1000">\n`;
-        xml += `              <hp:subList>\n`;
-        xml += `                <hp:p paraPrIDRef="0"><hp:run charPrIDRef="6"><hp:t>${cellText}</hp:t></hp:run></hp:p>\n`;
-        xml += `              </hp:subList>\n`;
-        xml += `            </hp:tc>\n`;
+      xml += `            <hp:tr>\n`;
+      for (let c = 0; c < colCount; c++) {
+        const cellText = escapeXml(rows[r][c] || "");
+        xml += `              <hp:tc borderFillIDRef="1" colSpan="1" rowSpan="1" colAddr="${c}" rowAddr="${r}" width="${colWidth}" height="1500">\n`;
+        xml += `                <hp:subList>\n`;
+        xml += `                  <hp:p paraPrIDRef="0"><hp:run charPrIDRef="0"><hp:t>${cellText}</hp:t></hp:run></hp:p>\n`;
+        xml += `                </hp:subList>\n`;
+        xml += `              </hp:tc>\n`;
       }
-      xml += `          </hp:tr>\n`;
+      xml += `            </hp:tr>\n`;
     }
     
-    xml += `        </hp:tbl>\n    </hp:p>`;
+    xml += `          </hp:tbl>\n`;
+    xml += `        </hp:ctrl>\n`;
+    xml += `      </hp:run>\n`;
+    xml += `    </hp:p>`;
     
     return xml;
   }
@@ -169,20 +176,20 @@ async function startServer() {
     }
 
     const templateBuffer = fs.readFileSync(templatePath);
+    const templateZip = await JSZip.loadAsync(templateBuffer);
     
-    // 1. 기존 ZIP(템플릿)을 그대로 로드하여 디렉터리 구조 및 메타데이터 완벽 보존
-    const zip = await JSZip.loadAsync(templateBuffer);
+    // 1. mimetype이 반드시 첫 번째 위치에 STORE(무압축)로 있어야 함
+    const newZip = new JSZip();
+    newZip.file("mimetype", "application/hwp+zip", { compression: "STORE" });
 
-    // 2. mimetype을 "STORE(무압축)" 방식으로 덮어쓰기 (HWPX 규격 필수)
-    zip.file("mimetype", "application/hwp+zip", { compression: "STORE" });
-
-    // 3. section0.xml 추출 및 수정
-    const sectionFile = zip.file("Contents/section0.xml");
+    // 2. section0.xml 추출 및 수정
+    const sectionFile = templateZip.file("Contents/section0.xml");
     if (!sectionFile) throw new Error("Contents/section0.xml not found in template.");
     
     const originalXml = await sectionFile.async("string");
     
-    const secPrMatch = originalXml.match(/<hp:secPr[\s\S]*?<\/hp:secPr>/);
+    // hp:secPr은 HWPX 필수 요소이므로 정확하게 추출 (self-closing 포함)
+    const secPrMatch = originalXml.match(/<hp:secPr[\s\S]*?(\/>|<\/hp:secPr>)/);
     const secPrXml = secPrMatch ? secPrMatch[0] : "";
     
     const rootTagMatch = originalXml.match(/<hs:sec[\s\S]*?>/);
@@ -200,39 +207,53 @@ async function startServer() {
     const lines = cleanMarkdown.split('\n');
     const xmlBlocks: string[] = [];
     
-    // [핵심] secPr 누락 완벽 방지
-    // 변수 차단을 위해 문서 최상단에 보이지 않는 빈 문단을 하나 만들고 페이지 설정(secPr)을 박아둡니다.
-    if (secPrXml) {
-      xmlBlocks.push(`    <hp:p paraPrIDRef="0">\n      <hp:run charPrIDRef="6">${secPrXml}<hp:t></hp:t></hp:run>\n    </hp:p>`);
-    }
-
     let inTable = false;
     let tableLines: string[] = [];
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
-      if (line.trim().startsWith('|')) {
+      const trimmedLine = line.trim();
+      
+      const isTableLine = trimmedLine.startsWith('|') || trimmedLine.split('|').length >= 3;
+      const isSeparator = trimmedLine.match(/^\|?[-: |]+\|?$/);
+
+      if (isTableLine || (inTable && isSeparator)) {
         inTable = true;
         tableLines.push(line);
       } else {
         if (inTable) {
-          xmlBlocks.push(buildTable(tableLines));
+          if (tableLines.length >= 2) xmlBlocks.push(buildTable(tableLines));
+          else tableLines.forEach(tl => xmlBlocks.push(buildPara(tl)));
           inTable = false;
           tableLines = [];
         }
-        xmlBlocks.push(buildPara(line)); 
+        
+        if (trimmedLine || i === lines.length - 1) {
+          xmlBlocks.push(buildPara(line));
+        }
       }
     }
-    if (inTable) xmlBlocks.push(buildTable(tableLines));
+    if (inTable) {
+      if (tableLines.length >= 2) xmlBlocks.push(buildTable(tableLines));
+      else tableLines.forEach(tl => xmlBlocks.push(buildPara(tl)));
+    }
 
     const newParas = xmlBlocks.join('\n');
-    const newSectionXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>\n${rootTag}\n${newParas}\n</hs:sec>`;
+    const newSectionXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>\n${rootTag}\n${newParas}\n${secPrXml}\n</hs:sec>`;
     
-    // 4. 수정한 section0.xml을 원본 zip에 덮어쓰기
-    zip.file("Contents/section0.xml", newSectionXml);
+    // 3. 새 ZIP 구성 (기존 파일 복사 및 mimetype 우선순위 보장)
+    for (const [relativePath, file] of Object.entries(templateZip.files)) {
+      if (relativePath === "mimetype") continue;
+      if (relativePath === "Contents/section0.xml") {
+        newZip.file(relativePath, newSectionXml);
+      } else {
+        const content = await file.async("uint8array");
+        newZip.file(relativePath, content);
+      }
+    }
 
-    // 5. 최종 HWPX 버퍼 생성
-    return await zip.generateAsync({ 
+    // 4. 최종 HWPX 버퍼 생성
+    return await newZip.generateAsync({ 
       type: 'nodebuffer',
       compression: 'DEFLATE'
     });

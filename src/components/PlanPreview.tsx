@@ -2,6 +2,8 @@ import React from "react";
 import { Download, AlertCircle, CheckCircle2, Sparkles } from "lucide-react";
 import { motion } from "motion/react";
 import { cn } from "@/src/lib/utils";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 interface TableData {
   headers: string[];
@@ -26,6 +28,60 @@ interface PlanPreviewProps {
   isGenerating: boolean;
 }
 
+const MarkdownContent = ({ content }: { content: string }) => {
+  return (
+    <div className="markdown-body prose prose-blue max-w-none text-gray-700 text-lg leading-relaxed">
+      <ReactMarkdown 
+        remarkPlugins={[remarkGfm]}
+        components={{
+          // Handle custom tags like [AI보완], [확인필요] and key phrases
+          p: ({ children }) => {
+            const processText = (text: string) => {
+              const parts = text.split(/(\[AI보완\]|\[확인필요\]|^[\s\-\d\.･]*[^:\n\s][^:\n]*:)/g);
+              return parts.map((part, i) => {
+                if (part === "[AI보완]") {
+                  return <span key={i} className="text-blue-600 font-bold">{part}</span>;
+                }
+                if (part === "[확인필요]") {
+                  return <span key={i} className="text-red-600 font-bold">{part}</span>;
+                }
+                if (part && part.endsWith(":") && !part.includes("\n")) {
+                  return <span key={i} className="font-bold text-gray-900">{part}</span>;
+                }
+                return part;
+              });
+            };
+
+            return (
+              <p>
+                {React.Children.map(children, child => {
+                  if (typeof child === 'string') {
+                    return processText(child);
+                  }
+                  return child;
+                })}
+              </p>
+            );
+          },
+          table: ({ children }) => (
+            <div className="my-6 overflow-hidden rounded-xl border border-gray-200">
+              <table className="w-full text-base text-left border-collapse">
+                {children}
+              </table>
+            </div>
+          ),
+          thead: ({ children }) => <thead className="bg-gray-50 text-gray-700 font-bold border-b border-gray-200">{children}</thead>,
+          th: ({ children }) => <th className="px-5 py-4 border-r border-gray-200 last:border-0">{children}</th>,
+          td: ({ children }) => <td className="px-5 py-4 text-gray-600 border-r border-gray-100 last:border-0">{children}</td>,
+          tr: ({ children }) => <tr className="hover:bg-gray-50/50 transition-colors border-b border-gray-100 last:border-0">{children}</tr>
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
+  );
+};
+
 export const PlanPreview = React.forwardRef<HTMLDivElement, PlanPreviewProps>(({
   title,
   sections,
@@ -35,32 +91,6 @@ export const PlanPreview = React.forwardRef<HTMLDivElement, PlanPreviewProps>(({
   onDownloadHwpx,
   isGenerating,
 }, ref) => {
-  const renderContent = (content: string) => {
-    const cleanContent = content.replace(/\*\*/g, "");
-    return cleanContent.split("\n").map((line, i) => {
-      // Regex to match tags or a key phrase at the start of the line (e.g., "매출 증대:", "- 고용 창출:", "  ･ 소제목:")
-      const parts = line.split(/(\[AI보완\]|\[확인필요\]|^[\s\-\d\.･]*[^:\n\s][^:\n]*:)/g);
-      const renderedLine = parts.map((part, j) => {
-        if (part === "[AI보완]") {
-          return <span key={j} className="text-blue-600 font-bold">{part}</span>;
-        }
-        if (part === "[확인필요]") {
-          return <span key={j} className="text-red-600 font-bold">{part}</span>;
-        }
-        if (part && part.endsWith(":") && !part.includes("\n")) {
-          return <span key={j} className="font-bold text-gray-900">{part}</span>;
-        }
-        return part;
-      });
-      return (
-        <React.Fragment key={i}>
-          {renderedLine}
-          {i < cleanContent.split("\n").length - 1 && "\n"}
-        </React.Fragment>
-      );
-    });
-  };
-
   if (isGenerating) {
     return (
       <div className="flex flex-col items-center justify-center py-20 gap-6 text-center">
@@ -127,7 +157,7 @@ export const PlanPreview = React.forwardRef<HTMLDivElement, PlanPreviewProps>(({
 
       <div className="bg-blue-50/50 rounded-2xl p-8 border border-blue-100">
         <h3 className="text-base font-bold text-blue-900 uppercase tracking-wider mb-3">핵심 요약 (Executive Summary)</h3>
-        <p className="text-blue-800 text-lg leading-relaxed">{summary}</p>
+        <p className="text-blue-800 text-lg leading-relaxed whitespace-pre-wrap">{summary}</p>
       </div>
 
       <div className="grid gap-10">
@@ -142,9 +172,8 @@ export const PlanPreview = React.forwardRef<HTMLDivElement, PlanPreviewProps>(({
                 </span>
               )}
             </div>
-            <div className="prose prose-blue max-w-none text-gray-700 text-lg leading-relaxed whitespace-pre-wrap">
-              {renderContent(section.content)}
-            </div>
+            
+            <MarkdownContent content={section.content} />
             
             {section.table && (
               <div className="mt-4 overflow-hidden rounded-xl border border-gray-200">
@@ -152,8 +181,8 @@ export const PlanPreview = React.forwardRef<HTMLDivElement, PlanPreviewProps>(({
                   <thead className="bg-gray-50 text-gray-700 font-bold border-b border-gray-200">
                     <tr>
                       {section.table.headers.map((header, hIdx) => (
-                        <th key={hIdx} className="px-5 py-4">
-                          {renderContent(header)}
+                        <th key={hIdx} className="px-5 py-4 border-r border-gray-200 last:border-0">
+                          {header}
                         </th>
                       ))}
                     </tr>
@@ -162,8 +191,8 @@ export const PlanPreview = React.forwardRef<HTMLDivElement, PlanPreviewProps>(({
                     {section.table.rows.map((row, rIdx) => (
                       <tr key={rIdx} className="hover:bg-gray-50/50 transition-colors">
                         {row.map((cell, cIdx) => (
-                          <td key={cIdx} className="px-5 py-4 text-gray-600 whitespace-pre-wrap">
-                            {renderContent(cell)}
+                          <td key={cIdx} className="px-5 py-4 text-gray-600 whitespace-pre-wrap border-r border-gray-100 last:border-0">
+                            {cell}
                           </td>
                         ))}
                       </tr>

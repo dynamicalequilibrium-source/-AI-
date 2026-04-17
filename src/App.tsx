@@ -16,6 +16,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${(pdfjsL
 
 import { UploadZone } from "@/src/components/UploadZone";
 import { PlanPreview } from "@/src/components/PlanPreview";
+import { RhwpEditorPanel } from "@/src/components/RhwpEditorPanel";
 import { cn } from "@/src/lib/utils";
 
 // Initialize Gemini
@@ -125,6 +126,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<"upload" | "history">("upload");
   const [additionalInfo, setAdditionalInfo] = useState("");
   const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
+  const [hwpxBuffer, setHwpxBuffer] = useState<ArrayBuffer | null>(null);
+  const [isPreviewMode, setIsPreviewMode] = useState<"visual" | "editor">("visual");
   const previewRef = React.useRef<HTMLDivElement>(null);
   const parsedFilesCache = React.useRef<Map<string, string>>(new Map());
 
@@ -256,6 +259,61 @@ export default function App() {
     } catch (err) {
       console.error(`Error parsing ${file.name}:`, err);
       throw err;
+    }
+  };
+
+  const convertToHwpxBuffer = async (generationResult: GenerationResult) => {
+    try {
+      // Build Markdown similar to downloadHwpx but returning the buffer
+      let markdown = `# ${generationResult.documentTitle}\n\n`;
+      markdown += `## 핵심 요약 (Executive Summary)\n${generationResult.summary}\n\n`;
+      
+      generationResult.sections.forEach(section => {
+        markdown += `## ${section.title}\n\n`;
+        const lines = section.content.split('\n');
+        const formattedLines = lines.map(line => {
+          const boldRegex = /^([\s\-\d\.･·]*)([^:\n]+:)(.*)$/;
+          const match = line.match(boldRegex);
+          if (match) {
+            const prefix = match[1];
+            const label = match[2];
+            const rest = match[3];
+            let level = "### "; 
+            if (prefix.includes('·') || prefix.includes('･') || prefix.includes('·')) {
+              level = "#### ";
+            }
+            let formattedRest = rest
+              .replace(/\[AI보완\]/g, '**[AI보완]**')
+              .replace(/\[확인필요\]/g, '**[확인필요]**');
+            return `${level}${prefix}${label}${formattedRest}`;
+          }
+          return line.replace(/\[AI보완\]/g, '**[AI보완]**').replace(/\[확인필요\]/g, '**[확인필요]**');
+        });
+        markdown += formattedLines.join('\n') + "\n\n";
+
+        if (section.table) {
+          markdown += `\n### ${section.title} 상세 데이터\n\n`;
+          markdown += "\n";
+          markdown += `| ${section.table.headers.join(" | ")} |\n`;
+          markdown += `| ${section.table.headers.map(() => "---").join(" | ")} |\n`;
+          section.table.rows.forEach(row => {
+            markdown += `| ${row.join(" | ")} |\n`;
+          });
+          markdown += "\n\n";
+        }
+      });
+
+      const response = await fetch("/api/convert-to-hwpx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ markdown, title: generationResult.documentTitle }),
+      });
+
+      if (!response.ok) throw new Error("Buffer conversion failed");
+      return await response.arrayBuffer();
+    } catch (error) {
+      console.error("Error converting to HWPX buffer:", error);
+      return null;
     }
   };
 
@@ -408,6 +466,17 @@ export default function App() {
         setResult(resultData);
         setAdditionalInfo(""); // Reset additional info after success
         toast.success("계획서가 성공적으로 생성되었습니다!", { id: "gen" });
+
+        // Convert to HWPX for editor
+        toast.loading("에디터용 HWPX 변환 중...", { id: "hwpx-load" });
+        const buffer = await convertToHwpxBuffer(resultData);
+        if (buffer) {
+          setHwpxBuffer(buffer);
+          setIsPreviewMode("visual"); // Default to visual preview
+          toast.success("에디터로 계획서를 불러왔습니다.", { id: "hwpx-load" });
+        } else {
+          toast.error("에디터 로드 실패 (파일 변환 오류)", { id: "hwpx-load" });
+        }
       } catch (parseError) {
         console.error("JSON Parse Error. Text was:", jsonText);
         throw new Error("AI 응답 형식이 올바르지 않습니다. (JSON 파싱 실패)");
@@ -726,13 +795,14 @@ export default function App() {
         markdown += formattedLines.join('\n') + "\n\n";
 
         if (section.table) {
-          markdown += `### ${section.title} 상세 데이터\n\n`;
+          markdown += `\n### ${section.title} 상세 데이터\n\n`;
+          markdown += "\n";
           markdown += `| ${section.table.headers.join(" | ")} |\n`;
-          markdown += `| ${section.table.headers.map(() => "---").join(" | ")} |\n`;
+          markdown += `| ${section.table.headers.map(() => "---").join(" | ") } |\n`;
           section.table.rows.forEach(row => {
             markdown += `| ${row.join(" | ")} |\n`;
           });
-          markdown += "\n";
+          markdown += "\n\n";
         }
       });
 
@@ -1089,59 +1159,98 @@ export default function App() {
 
               {/* Result Preview - Full Width Below Grid */}
               <div className="mt-12 flex flex-col gap-10">
-                {result && result.missingInfoQuestions && result.missingInfoQuestions.length > 0 && (
-                  <motion.div 
-                    initial={{ opacity: 0, scale: 0.98 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    className="bg-amber-50 border border-amber-100 rounded-[2.5rem] p-10 flex flex-col gap-8 shadow-sm"
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 bg-amber-100 rounded-2xl flex items-center justify-center">
-                        <AlertCircle className="w-7 h-7 text-amber-600" />
-                      </div>
-                      <div>
-                        <h3 className="text-xl font-bold text-amber-900">더 완벽한 계획서를 위해 추가 정보가 필요합니다</h3>
-                        <p className="text-amber-700 font-medium">아래 질문에 답변해주시면 계획서를 더 정교하게 보완해 드릴게요.</p>
-                      </div>
-                    </div>
-                    
-                    <div className="grid gap-4">
-                      {result.missingInfoQuestions.map((q, i) => (
-                        <div key={i} className="flex gap-4 items-start bg-white/50 p-4 rounded-2xl border border-amber-200/50">
-                          <span className="w-8 h-8 rounded-xl bg-amber-200 text-amber-800 text-sm font-bold flex items-center justify-center shrink-0">{i+1}</span>
-                          <p className="text-amber-900 font-bold leading-relaxed pt-1">{q}</p>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="flex flex-col gap-4">
-                      <textarea
-                        value={additionalInfo}
-                        onChange={(e) => setAdditionalInfo(e.target.value)}
-                        placeholder="여기에 답변을 입력해주세요 (예: 1번 질문에 대해서는...)"
-                        className="w-full h-40 p-6 rounded-[1.5rem] border border-amber-200 focus:ring-4 focus:ring-amber-500/10 focus:border-amber-500 outline-none resize-none text-lg bg-white"
-                      />
-                      <button
-                        onClick={handleAdditionalSubmit}
-                        disabled={isSubmittingFeedback || isGenerating}
-                        className="self-end px-10 py-4 bg-amber-600 text-white rounded-2xl font-extrabold text-lg hover:bg-amber-700 transition-all shadow-xl shadow-amber-200 disabled:opacity-50 active:scale-95"
-                      >
-                        {isSubmittingFeedback ? "보완 중..." : "답변 제출하고 계획서 보완하기"}
-                      </button>
-                    </div>
-                  </motion.div>
+                {result && (
+                  <div className="flex items-center justify-center p-1 bg-gray-100/80 rounded-2xl self-center shadow-inner">
+                    <button
+                      onClick={() => setIsPreviewMode("visual")}
+                      className={cn(
+                        "px-8 py-3 rounded-[1.25rem] text-base font-bold transition-all flex items-center gap-2",
+                        isPreviewMode === "visual"
+                          ? "bg-white text-blue-600 shadow-xl"
+                          : "text-gray-500 hover:text-gray-700"
+                      )}
+                    >
+                      <Layout className="w-5 h-5" />
+                      비주얼 미리보기
+                    </button>
+                    <button
+                      onClick={() => setIsPreviewMode("editor")}
+                      className={cn(
+                        "px-8 py-3 rounded-[1.25rem] text-base font-bold transition-all flex items-center gap-2",
+                        isPreviewMode === "editor"
+                          ? "bg-white text-cyan-600 shadow-xl"
+                          : "text-gray-500 hover:text-gray-700"
+                      )}
+                    >
+                      <FileText className="w-5 h-5" />
+                      RHWP 워드 편집기
+                    </button>
+                  </div>
                 )}
 
-                <PlanPreview
-                  ref={previewRef}
-                  title={result?.documentTitle || ""}
-                  sections={result?.sections || []}
-                  summary={result?.summary || ""}
-                  onDownloadDocx={downloadDocx}
-                  onDownloadPdf={downloadPdf}
-                  onDownloadHwpx={downloadHwpx}
-                  isGenerating={isGenerating}
-                />
+                {isPreviewMode === "visual" ? (
+                  <>
+                    {result && result.missingInfoQuestions && result.missingInfoQuestions.length > 0 && (
+                      <motion.div 
+                        initial={{ opacity: 0, scale: 0.98 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="bg-amber-50 border border-amber-100 rounded-[2.5rem] p-10 flex flex-col gap-8 shadow-sm"
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className="w-12 h-12 bg-amber-100 rounded-2xl flex items-center justify-center">
+                            <AlertCircle className="w-7 h-7 text-amber-600" />
+                          </div>
+                          <div>
+                            <h3 className="text-xl font-bold text-amber-900">더 완벽한 계획서를 위해 추가 정보가 필요합니다</h3>
+                            <p className="text-amber-700 font-medium">아래 질문에 답변해주시면 계획서를 더 정교하게 보완해 드릴게요.</p>
+                          </div>
+                        </div>
+                        
+                        <div className="grid gap-4">
+                          {result.missingInfoQuestions.map((q, i) => (
+                            <div key={i} className="flex gap-4 items-start bg-white/50 p-4 rounded-2xl border border-amber-200/50">
+                              <span className="w-8 h-8 rounded-xl bg-amber-200 text-amber-800 text-sm font-bold flex items-center justify-center shrink-0">{i+1}</span>
+                              <p className="text-amber-900 font-bold leading-relaxed pt-1">{q}</p>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="flex flex-col gap-4">
+                          <textarea
+                            value={additionalInfo}
+                            onChange={(e) => setAdditionalInfo(e.target.value)}
+                            placeholder="여기에 답변을 입력해주세요 (예: 1번 질문에 대해서는...)"
+                            className="w-full h-40 p-6 rounded-[1.5rem] border border-amber-200 focus:ring-4 focus:ring-amber-500/10 focus:border-amber-500 outline-none resize-none text-lg bg-white"
+                          />
+                          <button
+                            onClick={handleAdditionalSubmit}
+                            disabled={isSubmittingFeedback || isGenerating}
+                            className="self-end px-10 py-4 bg-amber-600 text-white rounded-2xl font-extrabold text-lg hover:bg-amber-700 transition-all shadow-xl shadow-amber-200 disabled:opacity-50 active:scale-95"
+                          >
+                            {isSubmittingFeedback ? "보완 중..." : "답변 제출하고 계획서 보완하기"}
+                          </button>
+                        </div>
+                      </motion.div>
+                    )}
+
+                    <PlanPreview
+                      ref={previewRef}
+                      title={result?.documentTitle || ""}
+                      sections={result?.sections || []}
+                      summary={result?.summary || ""}
+                      onDownloadDocx={downloadDocx}
+                      onDownloadPdf={downloadPdf}
+                      onDownloadHwpx={downloadHwpx}
+                      isGenerating={isGenerating}
+                    />
+                  </>
+                ) : (
+                  <RhwpEditorPanel 
+                    hwpxBuffer={hwpxBuffer} 
+                    fileName={`${result?.documentTitle || "사업계획서"}.hwpx`}
+                    isGenerating={isGenerating}
+                  />
+                )}
               </div>
             </motion.div>
       </main>
