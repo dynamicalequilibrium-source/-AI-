@@ -235,7 +235,15 @@ async function startServer() {
 
     // 5. 새로운 XML 조합
     const newParas = xmlBlocks.join('\n');
-    const newSectionXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>\n${rootTag}\n${newParas}\n${secPrXml}\n</hs:sec>`;
+    const newSectionXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<hs:sec xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section" 
+        xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph" 
+        xmlns:hh="http://www.hancom.co.kr/hwpml/2011/head" 
+        xmlns:hc="http://www.hancom.co.kr/hwpml/2011/core" 
+        xmlns:hm="http://www.hancom.co.kr/hwpml/2011/master-page">
+    ${newParas}
+    ${secPrXml}
+</hs:sec>`;
     
     // 6. [핵심] ZIP 구조를 새로 만들지 않고, section0.xml 파일 내용만 덮어쓰기
     zip.updateFile("Contents/section0.xml", Buffer.from(newSectionXml, "utf8"));
