@@ -46,16 +46,16 @@ export const RhwpEditorPanel: React.FC<RhwpEditorPanelProps> = ({
             console.log(`[RHWP] Loading document: ${fileName} (${hwpxBuffer.byteLength} bytes)`);
             const bytes = new Uint8Array(hwpxBuffer);
             
-            // Allow DOM to settle, especially if container was just cleared
-            await new Promise(resolve => setTimeout(resolve, 300));
+            // Give DOM a bit more time to settle
+            await new Promise(resolve => setTimeout(resolve, 500));
             
             await editorRef.current.loadFile(bytes, fileName);
             console.log("[RHWP] Document loaded successfully");
-            setError(null);
+            if (mounted) setError(null);
           } catch (loadErr) {
             console.error("[RHWP] loadFile failed:", loadErr);
             if (mounted) {
-              setError(`문서를 불러오는 중 오류가 발생했습니다: ${loadErr instanceof Error ? loadErr.message : "알 수 없는 형식 또는 손상된 파일"}`);
+              setError(`문서를 불러오는 중 오류가 발생했습니다: ${loadErr instanceof Error ? loadErr.message : "파일 형식이 올바르지 않거나 손상되었습니다."}`);
             }
           }
         } else if (hwpxBuffer && hwpxBuffer.byteLength === 0) {
@@ -65,18 +65,19 @@ export const RhwpEditorPanel: React.FC<RhwpEditorPanelProps> = ({
       } catch (err) {
         console.error("[RHWP] Initialization failed:", err);
         if (mounted) {
-          setError("에디터 초기화에 실패했습니다. 브라우저 호환성 또는 네트워크 상태를 확인해주세요.");
+          setError("에디터 초기화에 실패했습니다. 페이지를 새로고침 해주세요.");
         }
       }
     };
 
-    initEditor();
+    if (!isGenerating) {
+      initEditor();
+    }
 
     return () => {
       mounted = false;
-      // Note: If @rhwp/editor has a destroy method, call it here
     };
-  }, [hwpxBuffer, fileName]);
+  }, [hwpxBuffer, fileName, isGenerating]);
 
   return (
     <div className={cn("bg-white border border-gray-100 shadow-sm overflow-hidden flex flex-col transition-all duration-300", isFullScreen ? "fixed inset-0 z-[100]" : "relative rounded-xl min-h-[800px]")}>

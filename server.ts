@@ -6,7 +6,6 @@ import { fileURLToPath } from "url";
 import multer from "multer";
 import mammoth from "mammoth";
 import axios from "axios";
-import JSZip from "jszip";
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 const AdmZip = require("adm-zip");
@@ -111,6 +110,7 @@ async function startServer() {
     const baseCharId = TPL_IDS.CHAR[type === 'empty' ? 'paragraph' : type as keyof typeof TPL_IDS.CHAR];
     const runs = parseInline(text);
 
+    // HWPX 1.0 호환을 위해 속성을 태그 내부가 아닌 속성(attribute)으로 배치
     const runsXml = runs.map((r) => {
       const charId = r.bold ? TPL_IDS.CHAR.bold : baseCharId;
       return `      <hp:run charPrIDRef="${charId}"><hp:t>${escapeXml(r.text)}</hp:t></hp:run>`;
@@ -118,7 +118,7 @@ async function startServer() {
 
     const finalRunsXml = runsXml || `      <hp:run charPrIDRef="${baseCharId}"><hp:t></hp:t></hp:run>`;
 
-    return `    <hp:p paraPrIDRef="${paraId}">\n${finalRunsXml}\n    </hp:p>`;
+    return `    <hp:p paraPrIDRef="${paraId}" styleIDRef="0">\n${finalRunsXml}\n    </hp:p>`;
   }
 
   function buildTable(lines: string[]): string {
@@ -137,16 +137,18 @@ async function startServer() {
     const colWidth = Math.floor(40000 / colCount); 
     const tableId = Math.floor(Math.random() * 10000) + 1; 
 
-    // RHWP 및 Hancom Office 호환성을 위해 hp:tbl은 hp:p > hp:run > hp:ctrl 내부에 들어가는 경우가 많음
-    let xml = `    <hp:p paraPrIDRef="0">\n`;
-    xml += `      <hp:run charPrIDRef="0">\n`;
+    // 상위 요소 속성 및 대문자 Enum 적용 (HWPX 표준 준수)
+    let xml = `    <hp:p paraPrIDRef="0" styleIDRef="0">\n`;
+    xml += `      <hp:run charPrIDRef="6">\n`;
     xml += `        <hp:ctrl>\n`;
-    xml += `          <hp:tbl id="${tableId}" zOrder="0" numberingType="Table" textWrap="TopAndBottom" textFlow="BothSides" lock="false" dropCapStyle="None">\n`;
-    xml += `            <hp:sz width="40000" widthRelTo="Paper" height="2000" heightRelTo="Absolute" protect="false"/>\n`;
-    xml += `            <hp:pos treatAsChar="true" affectLSpacing="false" flowWithText="true" allowOverlap="false" holdAnchorAndSO="false" vertRelTo="Paragraph" horzRelTo="Column" vertAlign="Top" horzAlign="Center" vertOffset="0" horzOffset="0"/>\n`;
+    xml += `          <hp:tbl id="${tableId}" zOrder="0" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="CELL" repeatHeader="1">\n`;
+    xml += `            <hp:sz width="40000" widthRelTo="ABSOLUTE" height="0" heightRelTo="ABSOLUTE" protect="0"/>\n`;
+    xml += `            <hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="PARA" vertAlign="TOP" horzAlign="CENTER" vertOffset="0" horzOffset="0"/>\n`;
     xml += `            <hp:outMargin left="0" right="0" top="0" bottom="0"/>\n`;
     xml += `            <hp:shapeComment/>\n`;
     xml += `            <hp:inMargin left="141" right="141" top="141" bottom="141"/>\n`;
+    xml += `            <hp:cellSpacing>0</hp:cellSpacing>\n`;
+    xml += `            <hp:borderFill borderFillIDRef="1"/>\n`;
 
     for (let r = 0; r < rows.length; r++) {
       xml += `            <hp:tr>\n`;
@@ -154,7 +156,7 @@ async function startServer() {
         const cellText = escapeXml(rows[r][c] || "");
         xml += `              <hp:tc borderFillIDRef="1" colSpan="1" rowSpan="1" colAddr="${c}" rowAddr="${r}" width="${colWidth}" height="1500">\n`;
         xml += `                <hp:subList>\n`;
-        xml += `                  <hp:p paraPrIDRef="0"><hp:run charPrIDRef="0"><hp:t>${cellText}</hp:t></hp:run></hp:p>\n`;
+        xml += `                  <hp:p paraPrIDRef="0" styleIDRef="0"><hp:run charPrIDRef="6"><hp:t>${cellText}</hp:t></hp:run></hp:p>\n`;
         xml += `                </hp:subList>\n`;
         xml += `              </hp:tc>\n`;
       }
@@ -175,27 +177,27 @@ async function startServer() {
       throw new Error("HWPX template (idea.hwpx) not found in public folder.");
     }
 
-    const templateBuffer = fs.readFileSync(templatePath);
-    const templateZip = await JSZip.loadAsync(templateBuffer);
+    const zip = new AdmZip(templatePath);
     
-    // 1. mimetype이 반드시 첫 번째 위치에 STORE(무압축)로 있어야 함
-    const newZip = new JSZip();
-    newZip.file("mimetype", "application/hwp+zip", { compression: "STORE" });
-
-    // 2. section0.xml 추출 및 수정
-    const sectionFile = templateZip.file("Contents/section0.xml");
-    if (!sectionFile) throw new Error("Contents/section0.xml not found in template.");
+    const sectionEntry = zip.getEntry("Contents/section0.xml");
+    if (!sectionEntry) throw new Error("Contents/section0.xml not found in template.");
     
-    const originalXml = await sectionFile.async("string");
+    const originalXml = sectionEntry.getData().toString("utf8");
     
-    // hp:secPr은 HWPX 필수 요소이므로 정확하게 추출 (self-closing 포함)
-    const secPrMatch = originalXml.match(/<hp:secPr[\s\S]*?(\/>|<\/hp:secPr>)/);
-    const secPrXml = secPrMatch ? secPrMatch[0] : "";
-    
-    const rootTagMatch = originalXml.match(/<hs:sec[\s\S]*?>/);
+    const rootTagMatch = originalXml.match(/<hs:sec[^>]*>/);
     const rootTag = rootTagMatch ? rootTagMatch[0] : '<hs:sec xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section" xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">';
+    
+    const secPrMatch = originalXml.match(/<hp:secPr[\s\S]*?<\/hp:secPr>/);
+    let secPrXml = "";
+    if (secPrMatch) {
+      secPrXml = secPrMatch[0];
+    } else {
+      const secPrSelfCloseMatch = originalXml.match(/<hp:secPr[\s\S]*?\/>/);
+      if (secPrSelfCloseMatch) {
+        secPrXml = secPrSelfCloseMatch[0];
+      }
+    }
 
-    // 윈도우 줄바꿈(CRLF)으로 인한 XML 파싱 오류 방지를 위해 전처리 강화
     let cleanMarkdown = md
       .replace(/\r\n/g, '\n')
       .replace(/\r/g, '\n')
@@ -227,7 +229,6 @@ async function startServer() {
           inTable = false;
           tableLines = [];
         }
-        
         if (trimmedLine || i === lines.length - 1) {
           xmlBlocks.push(buildPara(line));
         }
@@ -239,24 +240,22 @@ async function startServer() {
     }
 
     const newParas = xmlBlocks.join('\n');
-    const newSectionXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>\n${rootTag}\n${newParas}\n${secPrXml}\n</hs:sec>`;
     
-    // 3. 새 ZIP 구성 (기존 파일 복사 및 mimetype 우선순위 보장)
-    for (const [relativePath, file] of Object.entries(templateZip.files)) {
-      if (relativePath === "mimetype") continue;
-      if (relativePath === "Contents/section0.xml") {
-        newZip.file(relativePath, newSectionXml);
-      } else {
-        const content = await file.async("uint8array");
-        newZip.file(relativePath, content);
-      }
-    }
+    // HWPX 규격 상 secPr은 hs:sec의 직접 자식이 아니라, 첫 번째 hp:p > hp:run의 자식이어야 함
+    // 그리고 구역 속성(secPr) 다음에는 필수적으로 단 속성(colPr) 제어 코드(ctrl)가 와야 함
+    const colPrXml = `<hp:ctrl><hp:colPr id="" type="NEWSPAPER" layout="LEFT" colCount="1" sameSz="1" sameGap="0"/></hp:ctrl>`;
+    
+    // 혼선을 방지하기 위해 구역/단 속성만을 담는 전용 빈 문단을 파일의 최상단에 하나 강제로 생성합니다.
+    const rootParaXml = `    <hp:p paraPrIDRef="0" styleIDRef="0">\n      <hp:run charPrIDRef="6">\n${secPrXml}\n${colPrXml}\n      </hp:run>\n    </hp:p>`;
+    
+    const finalParas = `${rootParaXml}\n${newParas}`;
 
-    // 4. 최종 HWPX 버퍼 생성
-    return await newZip.generateAsync({ 
-      type: 'nodebuffer',
-      compression: 'DEFLATE'
-    });
+    const newSectionXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n${rootTag}\n${finalParas}\n</hs:sec>`;
+    
+    // AdmZip을 이용해 파일 덮어쓰기 (기존 폴더 구조 및 mimetype 무결성 보존)
+    zip.updateFile("Contents/section0.xml", Buffer.from(newSectionXml, "utf8"));
+    
+    return zip.toBuffer();
   }
 
   // ===========================
@@ -267,7 +266,7 @@ async function startServer() {
     if (!markdown) return res.status(400).json({ error: "Markdown content is required" });
 
     try {
-      console.log("Generating HWPX locally with JSZip...");
+      console.log("Generating HWPX locally with AdmZip...");
       const buf = await generateHWPX(markdown, title || "document");
       res.setHeader('Content-Type', 'application/vnd.hancom.hwpx');
       res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(title || "document")}.hwpx"`);
