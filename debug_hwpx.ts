@@ -70,8 +70,9 @@ async function test() {
     if (!sectionFile) throw new Error("not found");
     
     const originalXml = await sectionFile.async("string");
-    console.log("Original XML start:\n" + originalXml.substring(0, 1500));
-    
+    console.log("Original XML start:\n" + originalXml.substring(0, 500));
+    console.log("Original XML end:\n" + originalXml.substring(originalXml.length - 500));
+
     const rootTagMatch = originalXml.match(/<hs:sec[^>]*>/);
     const rootTag = rootTagMatch ? rootTagMatch[0] : '<hs:sec>';
     

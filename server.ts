@@ -6,6 +6,7 @@ import { fileURLToPath } from "url";
 import multer from "multer";
 import mammoth from "mammoth";
 import axios from "axios";
+import JSZip from "jszip";
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 const AdmZip = require("adm-zip");
@@ -141,7 +142,7 @@ async function startServer() {
     let xml = `    <hp:p paraPrIDRef="0" styleIDRef="0">\n`;
     xml += `      <hp:run charPrIDRef="6">\n`;
     xml += `        <hp:ctrl>\n`;
-    xml += `          <hp:tbl id="${tableId}" zOrder="0" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="CELL" repeatHeader="1">\n`;
+    xml += `          <hp:tbl id="${tableId}" zOrder="0" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropCapStyle="None" pageBreak="CELL" repeatHeader="1">\n`;
     xml += `            <hp:sz width="40000" widthRelTo="ABSOLUTE" height="0" heightRelTo="ABSOLUTE" protect="0"/>\n`;
     xml += `            <hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="PARA" vertAlign="TOP" horzAlign="CENTER" vertOffset="0" horzOffset="0"/>\n`;
     xml += `            <hp:outMargin left="0" right="0" top="0" bottom="0"/>\n`;
@@ -177,26 +178,19 @@ async function startServer() {
       throw new Error("HWPX template (idea.hwpx) not found in public folder.");
     }
 
-    const zip = new AdmZip(templatePath);
+    const templateBuffer = fs.readFileSync(templatePath);
+    const templateZip = await JSZip.loadAsync(templateBuffer);
     
-    const sectionEntry = zip.getEntry("Contents/section0.xml");
-    if (!sectionEntry) throw new Error("Contents/section0.xml not found in template.");
+    const sectionFile = templateZip.file("Contents/section0.xml");
+    if (!sectionFile) throw new Error("Contents/section0.xml not found in template.");
     
-    const originalXml = sectionEntry.getData().toString("utf8");
+    const originalXml = await sectionFile.async("string");
     
     const rootTagMatch = originalXml.match(/<hs:sec[^>]*>/);
     const rootTag = rootTagMatch ? rootTagMatch[0] : '<hs:sec xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section" xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">';
     
-    const secPrMatch = originalXml.match(/<hp:secPr[\s\S]*?<\/hp:secPr>/);
-    let secPrXml = "";
-    if (secPrMatch) {
-      secPrXml = secPrMatch[0];
-    } else {
-      const secPrSelfCloseMatch = originalXml.match(/<hp:secPr[\s\S]*?\/>/);
-      if (secPrSelfCloseMatch) {
-        secPrXml = secPrSelfCloseMatch[0];
-      }
-    }
+    const secPrMatch = originalXml.match(/<hp:secPr[\s\S]*?(\/>|<\/hp:secPr>)/);
+    const secPrXml = secPrMatch ? secPrMatch[0] : "";
 
     let cleanMarkdown = md
       .replace(/\r\n/g, '\n')
@@ -240,22 +234,33 @@ async function startServer() {
     }
 
     const newParas = xmlBlocks.join('\n');
+    // HWPX 규격: secPr은 hs:sec의 직접 자식으로 본문 내용 뒤에 올 수 있음
+    const newSectionXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>\n${rootTag}\n${newParas}\n${secPrXml}\n</hs:sec>`;
     
-    // HWPX 규격 상 secPr은 hs:sec의 직접 자식이 아니라, 첫 번째 hp:p > hp:run의 자식이어야 함
-    // 그리고 구역 속성(secPr) 다음에는 필수적으로 단 속성(colPr) 제어 코드(ctrl)가 와야 함
-    const colPrXml = `<hp:ctrl><hp:colPr id="" type="NEWSPAPER" layout="LEFT" colCount="1" sameSz="1" sameGap="0"/></hp:ctrl>`;
+    const newZip = new JSZip();
+    newZip.file("mimetype", "application/hwp+zip", { compression: "STORE" });
     
-    // 혼선을 방지하기 위해 구역/단 속성만을 담는 전용 빈 문단을 파일의 최상단에 하나 강제로 생성합니다.
-    const rootParaXml = `    <hp:p paraPrIDRef="0" styleIDRef="0">\n      <hp:run charPrIDRef="6">\n${secPrXml}\n${colPrXml}\n      </hp:run>\n    </hp:p>`;
-    
-    const finalParas = `${rootParaXml}\n${newParas}`;
+    for (const [relativePath, file] of Object.entries(templateZip.files)) {
+      if (relativePath === "mimetype") continue;
+      
+      // 폴더(디렉토리)인 경우 파일로 덮어쓰지 않도록 처리
+      if (file.dir) {
+        newZip.folder(relativePath);
+        continue;
+      }
 
-    const newSectionXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n${rootTag}\n${finalParas}\n</hs:sec>`;
-    
-    // AdmZip을 이용해 파일 덮어쓰기 (기존 폴더 구조 및 mimetype 무결성 보존)
-    zip.updateFile("Contents/section0.xml", Buffer.from(newSectionXml, "utf8"));
-    
-    return zip.toBuffer();
+      if (relativePath === "Contents/section0.xml") {
+        newZip.file(relativePath, newSectionXml);
+      } else {
+        const content = await file.async("uint8array");
+        newZip.file(relativePath, content);
+      }
+    }
+
+    return await newZip.generateAsync({ 
+      type: 'nodebuffer',
+      compression: 'DEFLATE'
+    });
   }
 
   // ===========================
@@ -266,7 +271,7 @@ async function startServer() {
     if (!markdown) return res.status(400).json({ error: "Markdown content is required" });
 
     try {
-      console.log("Generating HWPX locally with AdmZip...");
+      console.log("Generating HWPX locally with JSZip...");
       const buf = await generateHWPX(markdown, title || "document");
       res.setHeader('Content-Type', 'application/vnd.hancom.hwpx');
       res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(title || "document")}.hwpx"`);
