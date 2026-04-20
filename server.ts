@@ -6,7 +6,6 @@ import { fileURLToPath } from "url";
 import multer from "multer";
 import mammoth from "mammoth";
 import axios from "axios";
-import JSZip from "jszip";
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 const AdmZip = require("adm-zip");
@@ -78,10 +77,12 @@ async function startServer() {
     return parts.length ? parts : [{ text, bold: false }];
   }
 
-  // 템플릿(idea.hwpx)의 header.xml 분석 결과 기반 ID 매핑
+  // 새 템플릿(idea.hwpx)의 header.xml 기반 ID 매핑
+  // PARA: 0=본문, 1=H1(개요1), 2=H2(개요2), 3=H3(개요3), 4=H4(개요4)
+  // CHAR: 0=본문10pt, 1=굵게10pt, 2=H1 14pt굵게, 3=H2 12pt굵게, 4=H3 11pt굵게, 5=H4 10pt굵게
   const TPL_IDS = {
-    PARA: { h1: "19", h2: "23", h3: "0", h4: "0", paragraph: "0", empty: "0" },
-    CHAR: { h1: "10", h2: "4", h3: "14", h4: "5", paragraph: "6", bold: "11" }
+    PARA: { h1: "1", h2: "2", h3: "3", h4: "4", paragraph: "0", empty: "0" },
+    CHAR: { h1: "2", h2: "3", h3: "4", h4: "5", paragraph: "0", bold: "1" }
   };
 
   function buildPara(line: string): string {
@@ -119,8 +120,7 @@ async function startServer() {
 
     const finalRunsXml = runsXml || `      <hp:run charPrIDRef="${baseCharId}"><hp:t></hp:t></hp:run>`;
 
-    const pId = Math.floor(Math.random() * 2000000000);
-    return `    <hp:p id="${pId}" paraPrIDRef="${paraId}" styleIDRef="0">\n${finalRunsXml}\n    </hp:p>`;
+    return `    <hp:p paraPrIDRef="${paraId}" styleIDRef="0">\n${finalRunsXml}\n    </hp:p>`;
   }
 
   function buildTable(lines: string[]): string {
@@ -141,9 +141,9 @@ async function startServer() {
 
     // 상위 요소 속성 및 대문자 Enum 적용 (HWPX 표준 준수)
     let xml = `    <hp:p paraPrIDRef="0" styleIDRef="0">\n`;
-    xml += `      <hp:run charPrIDRef="6">\n`;
+    xml += `      <hp:run charPrIDRef="0">\n`;
     xml += `        <hp:ctrl>\n`;
-    xml += `          <hp:tbl id="${tableId}" zOrder="0" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropCapStyle="None" pageBreak="CELL" repeatHeader="1" rowCnt="${rows.length}" colCnt="${colCount}" cellSpacing="0" borderFillIDRef="1">\n`;
+    xml += `          <hp:tbl id="${tableId}" zOrder="0" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropCapStyle="None" pageBreak="CELL" repeatHeader="1">\n`;
     xml += `            <hp:sz width="40000" widthRelTo="ABSOLUTE" height="0" heightRelTo="ABSOLUTE" protect="0"/>\n`;
     xml += `            <hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="PARA" vertAlign="TOP" horzAlign="CENTER" vertOffset="0" horzOffset="0"/>\n`;
     xml += `            <hp:outMargin left="0" right="0" top="0" bottom="0"/>\n`;
@@ -158,7 +158,7 @@ async function startServer() {
         const cellText = escapeXml(rows[r][c] || "");
         xml += `              <hp:tc borderFillIDRef="1" colSpan="1" rowSpan="1" colAddr="${c}" rowAddr="${r}" width="${colWidth}" height="1500">\n`;
         xml += `                <hp:subList>\n`;
-        xml += `                  <hp:p paraPrIDRef="0" styleIDRef="0"><hp:run charPrIDRef="6"><hp:t>${cellText}</hp:t></hp:run></hp:p>\n`;
+        xml += `                  <hp:p paraPrIDRef="0" styleIDRef="0"><hp:run charPrIDRef="0"><hp:t>${cellText}</hp:t></hp:run></hp:p>\n`;
         xml += `                </hp:subList>\n`;
         xml += `              </hp:tc>\n`;
       }
@@ -179,28 +179,29 @@ async function startServer() {
       throw new Error("HWPX template (idea.hwpx) not found in public folder.");
     }
 
-    // 1. JSZip으로 원본 템플릿(idea.hwpx) 로드
+    // JSZip은 adm-zip과 달리 idea.hwpx의 ZIP 구조를 정상적으로 읽음
+    const JSZip = require('jszip');
     const templateBuffer = fs.readFileSync(templatePath);
     const templateZip = await JSZip.loadAsync(templateBuffer);
-    
-    // 2. section0.xml 원본 내용 추출하여 뼈대(secPr, 루트 태그) 가져오기
+
     const sectionFile = templateZip.file("Contents/section0.xml");
     if (!sectionFile) throw new Error("Contents/section0.xml not found in template.");
+
     const originalXml = await sectionFile.async("string");
-    
+
     const rootTagMatch = originalXml.match(/<hs:sec[^>]*>/);
-    const rootTag = rootTagMatch ? rootTagMatch[0] : '<hs:sec xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section" xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph" xmlns:hh="http://www.hancom.co.kr/hwpml/2011/head" xmlns:hc="http://www.hancom.co.kr/hwpml/2011/core" xmlns:hm="http://www.hancom.co.kr/hwpml/2011/master-page">';
-    
-    // Extract full secPr properly
+    const rootTag = rootTagMatch ? rootTagMatch[0] : '<hs:sec xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section" xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">';
+
     const secPrMatch = originalXml.match(/<hp:secPr[\s\S]*?<\/hp:secPr>/);
-    const secPrXml = secPrMatch ? secPrMatch[0] : "";
-    
-    // Embed it into a wrapper paragraph placed at the top of the section
-    const rootParaXml = `    <hp:p paraPrIDRef="22" styleIDRef="0">
-      <hp:run charPrIDRef="7">
-        ${secPrXml}
-      </hp:run>
-    </hp:p>`;
+    let secPrXml = "";
+    if (secPrMatch) {
+      secPrXml = secPrMatch[0];
+    } else {
+      const secPrSelfCloseMatch = originalXml.match(/<hp:secPr[\s\S]*?\/>/);
+      if (secPrSelfCloseMatch) {
+        secPrXml = secPrSelfCloseMatch[0];
+      }
+    }
 
     let cleanMarkdown = md
       .replace(/\r\n/g, '\n')
@@ -243,41 +244,21 @@ async function startServer() {
       else tableLines.forEach(tl => xmlBlocks.push(buildPara(tl)));
     }
 
-    // 5. 새로운 XML 조합
     const newParas = xmlBlocks.join('\n');
-    const newSectionXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
-${rootTag}
-    ${rootParaXml}
-${newParas}
-</hs:sec>`;
-    
-    // 6. [핵심] ZIP 구조를 새로 생성하며 mimetype을 가장 먼저 무압축으로 배치
-    const newZip = new JSZip();
-    newZip.file("mimetype", "application/hwp+zip", { compression: "STORE" });
-    
-    // 기존 템플릿 파일들을 순회하며 복사하되, 폴더나 mimetype은 건너뛰거나 처리
-    for (const [relativePath, file] of Object.entries(templateZip.files)) {
-      if (relativePath === "mimetype") continue;
-      
-      // 폴더(디렉토리 - OCF 구조상의 취약점 방지)
-      if (file.dir) {
-        newZip.folder(relativePath);
-        continue;
-      }
 
-      if (relativePath === "Contents/section0.xml") {
-        newZip.file(relativePath, Buffer.from(newSectionXml, "utf8"));
-      } else {
-        const content = await file.async("uint8array");
-        newZip.file(relativePath, content);
-      }
-    }
+    // HWPX 규격: hp:secPr은 hs:sec의 직접 자식으로, 모든 hp:p 이후에 위치해야 함
+    const newSectionXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n${rootTag}\n${newParas}\n${secPrXml}\n</hs:sec>`;
 
-    // 7. 최종 버퍼 반환
-    return await newZip.generateAsync({ 
-      type: 'nodebuffer',
-      compression: 'DEFLATE'
+    // JSZip으로 section0.xml만 교체하고, 나머지 파일(header.xml, manifest 등)은 원본 유지
+    templateZip.file("Contents/section0.xml", newSectionXml);
+
+    const outputBuffer = await templateZip.generateAsync({
+      type: "nodebuffer",
+      compression: "DEFLATE",
+      compressionOptions: { level: 6 }
     });
+
+    return outputBuffer;
   }
 
   // ===========================
@@ -288,7 +269,7 @@ ${newParas}
     if (!markdown) return res.status(400).json({ error: "Markdown content is required" });
 
     try {
-      console.log("Generating HWPX locally with JSZip (mimetype preserved)...");
+      console.log("Generating HWPX locally with AdmZip...");
       const buf = await generateHWPX(markdown, title || "document");
       res.setHeader('Content-Type', 'application/vnd.hancom.hwpx');
       res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(title || "document")}.hwpx"`);
