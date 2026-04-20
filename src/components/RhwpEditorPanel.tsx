@@ -17,6 +17,7 @@ export const RhwpEditorPanel: React.FC<RhwpEditorPanelProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<any>(null);
+  const initPromiseRef = useRef<Promise<any> | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isFullScreen, setIsFullScreen] = useState(false);
@@ -24,16 +25,26 @@ export const RhwpEditorPanel: React.FC<RhwpEditorPanelProps> = ({
   useEffect(() => {
     let mounted = true;
 
+    // Polyfill for RHWP editor to work in custom environments
+    if (typeof (globalThis as any).measureTextWidth !== 'function') {
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      (globalThis as any).measureTextWidth = (font: string, text: string): number => {
+        if (!ctx) return text.length * 10;
+        ctx.font = font;
+        return ctx.measureText(text).width;
+      };
+    }
+
     const initEditor = async () => {
       if (!containerRef.current) return;
       
       try {
-        if (!editorRef.current) {
+        if (!editorRef.current || !containerRef.current.hasChildNodes()) {
           console.log("[RHWP] Initializing Editor...");
-          // Ensure container is clean to avoid double-toolbars in React dev mode
           containerRef.current.innerHTML = "";
           editorRef.current = await createEditor(containerRef.current);
-          console.log("[RHWP] Editor instance created");
+          console.log("[RHWP] Editor instance ready.");
         }
         
         if (mounted) {
@@ -51,6 +62,12 @@ export const RhwpEditorPanel: React.FC<RhwpEditorPanelProps> = ({
             
             await editorRef.current.loadFile(bytes, fileName);
             console.log("[RHWP] Document loaded successfully");
+            
+            // 데스크탑 환경 등에서 캔버스가 즉시 렌더링되지 않는 현상을 방지하기 위해 강제 리사이즈 이벤트 발생
+            setTimeout(() => {
+              if (mounted) window.dispatchEvent(new Event('resize'));
+            }, 100);
+
             if (mounted) setError(null);
           } catch (loadErr) {
             console.error("[RHWP] loadFile failed:", loadErr);
@@ -103,7 +120,7 @@ export const RhwpEditorPanel: React.FC<RhwpEditorPanelProps> = ({
         </button>
       </div>
 
-      <div className="relative flex-1 bg-gray-50 min-h-0" style={{ height: isFullScreen ? 'calc(100vh - 56px)' : '800px' }}>
+      <div className="relative flex-1 min-h-[600px] w-full bg-gray-100 flex flex-col" style={{ height: isFullScreen ? 'calc(100vh - 56px)' : '800px' }}>
         <AnimatePresence>
           {(!isReady || isGenerating) && (
             <motion.div
@@ -142,7 +159,7 @@ export const RhwpEditorPanel: React.FC<RhwpEditorPanelProps> = ({
 
         <div 
           ref={containerRef} 
-          className="w-full h-full"
+          className="absolute inset-0 w-full h-full border-0 outline-none overflow-hidden"
           id="rhwp-container"
         />
       </div>

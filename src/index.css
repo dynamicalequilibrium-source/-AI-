@@ -7,3 +7,10 @@
   --font-dohyeon: "SUITE", "Do Hyeon", sans-serif;
   --font-jua: "SUITE", "Jua", sans-serif;
 }
+
+@layer base {
+  body {
+    word-break: break-word;
+    overflow-wrap: break-word;
+  }
+}

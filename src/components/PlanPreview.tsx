@@ -30,7 +30,7 @@ interface PlanPreviewProps {
 
 const MarkdownContent = ({ content }: { content: string }) => {
   return (
-    <div className="markdown-body prose prose-blue max-w-none text-gray-700 text-lg leading-relaxed">
+    <div className="markdown-body w-full max-w-full overflow-hidden prose prose-blue text-gray-700 text-[15px] md:text-lg leading-relaxed break-words overflow-wrap-anywhere">
       <ReactMarkdown 
         remarkPlugins={[remarkGfm]}
         components={{
@@ -53,7 +53,7 @@ const MarkdownContent = ({ content }: { content: string }) => {
             };
 
             return (
-              <p>
+              <p className="whitespace-pre-wrap break-words w-full">
                 {React.Children.map(children, child => {
                   if (typeof child === 'string') {
                     return processText(child);
@@ -64,8 +64,8 @@ const MarkdownContent = ({ content }: { content: string }) => {
             );
           },
           table: ({ children }) => (
-            <div className="my-6 overflow-hidden rounded-xl border border-gray-200">
-              <table className="w-full text-base text-left border-collapse">
+            <div className="my-6 w-full max-w-full overflow-x-auto rounded-xl border border-gray-200">
+              <table className="w-full min-w-[600px] text-sm md:text-base text-left border-collapse">
                 {children}
               </table>
             </div>
@@ -119,50 +119,50 @@ export const PlanPreview = React.forwardRef<HTMLDivElement, PlanPreviewProps>(({
       ref={ref}
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="flex flex-col gap-8 pb-20 bg-white p-12 shadow-sm border border-gray-100"
+      className="flex flex-col gap-8 pb-10 md:pb-20 bg-white p-6 md:p-12 shadow-sm border border-gray-100 overflow-hidden w-full max-w-full"
     >
-      <div className="flex items-center justify-between border-b border-gray-100 pb-6">
-        <div className="flex flex-col gap-1">
-          <h2 className="text-2xl font-bold text-gray-900">{title}</h2>
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between border-b border-gray-100 pb-6 gap-6">
+        <div className="flex flex-col gap-2">
+          <h2 className="text-xl md:text-2xl font-bold text-gray-900 break-words">{title}</h2>
           <div className="flex items-center gap-2 text-sm text-green-600 font-medium">
             <CheckCircle2 className="w-4 h-4" />
             생성 완료
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <span className="text-gray-500 font-medium mr-1">다운로드받기</span>
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+          <span className="text-gray-500 font-medium mr-1 hidden sm:inline">다운로드받기</span>
           <button
             onClick={onDownloadHwpx}
-            className="flex items-center gap-2 px-6 py-3 bg-cyan-600 text-white rounded-xl font-semibold hover:bg-cyan-700 transition-all shadow-lg shadow-cyan-200 active:scale-95"
+            className="flex flex-1 items-center justify-center gap-2 px-4 md:px-6 py-3 bg-cyan-600 text-white rounded-xl font-semibold hover:bg-cyan-700 transition-all shadow-lg shadow-cyan-200 active:scale-95"
           >
-            <Download className="w-5 h-5" />
-            HWPX
+            <Download className="w-5 h-5 shrink-0" />
+            <span className="whitespace-nowrap">HWPX</span>
           </button>
           <button
             onClick={onDownloadDocx}
-            className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 active:scale-95"
+            className="flex flex-1 items-center justify-center gap-2 px-4 md:px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 active:scale-95"
           >
-            <Download className="w-5 h-5" />
-            DOCX
+            <Download className="w-5 h-5 shrink-0" />
+            <span className="whitespace-nowrap">DOCX</span>
           </button>
           <button
             onClick={onDownloadPdf}
-            className="flex items-center gap-2 px-6 py-3 bg-red-600 text-white rounded-xl font-semibold hover:bg-red-700 transition-all shadow-lg shadow-red-200 active:scale-95"
+            className="flex flex-1 items-center justify-center gap-2 px-4 md:px-6 py-3 bg-red-600 text-white rounded-xl font-semibold hover:bg-red-700 transition-all shadow-lg shadow-red-200 active:scale-95"
           >
-            <Download className="w-5 h-5" />
-            PDF
+            <Download className="w-5 h-5 shrink-0" />
+            <span className="whitespace-nowrap">PDF</span>
           </button>
         </div>
       </div>
 
       <div className="bg-blue-50/50 rounded-2xl p-8 border border-blue-100">
-        <h3 className="text-base font-bold text-blue-900 uppercase tracking-wider mb-3">핵심 요약 (Executive Summary)</h3>
-        <p className="text-blue-800 text-lg leading-relaxed whitespace-pre-wrap">{summary}</p>
+        <h3 className="text-base font-bold text-blue-900 uppercase tracking-wider mb-3 break-words">핵심 요약 (Executive Summary)</h3>
+        <p className="text-blue-800 text-[15px] md:text-lg leading-relaxed whitespace-pre-wrap break-words">{summary}</p>
       </div>
 
-      <div className="grid gap-10">
+      <div className="grid gap-10 w-full max-w-full">
         {sections.map((section, index) => (
-          <div key={index} className="flex flex-col gap-6 group">
+          <div key={index} className="flex flex-col gap-6 group w-full max-w-full min-w-0">
             <div className="flex items-center justify-between">
               <h3 className="text-2xl font-bold text-gray-900">{section.title}</h3>
               {section.hasAiSupport && (
@@ -176,8 +176,8 @@ export const PlanPreview = React.forwardRef<HTMLDivElement, PlanPreviewProps>(({
             <MarkdownContent content={section.content} />
             
             {section.table && (
-              <div className="mt-4 overflow-hidden rounded-xl border border-gray-200">
-                <table className="w-full text-base text-left">
+              <div className="mt-4 w-full max-w-full overflow-x-auto rounded-xl border border-gray-200">
+                <table className="w-full min-w-[600px] text-sm md:text-base text-left">
                   <thead className="bg-gray-50 text-gray-700 font-bold border-b border-gray-200">
                     <tr>
                       {section.table.headers.map((header, hIdx) => (

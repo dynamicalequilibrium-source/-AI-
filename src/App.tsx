@@ -1158,32 +1158,32 @@ export default function App() {
               </motion.div>
 
               {/* Result Preview - Full Width Below Grid */}
-              <div className="mt-12 flex flex-col gap-10">
+              <div className="mt-12 flex flex-col gap-10 w-full max-w-full overflow-x-hidden">
                 {result && (
                   <div className="flex items-center justify-center p-1 bg-gray-100/80 rounded-2xl self-center shadow-inner">
                     <button
                       onClick={() => setIsPreviewMode("visual")}
                       className={cn(
-                        "px-8 py-3 rounded-[1.25rem] text-base font-bold transition-all flex items-center gap-2",
+                        "px-6 py-3 rounded-[1.25rem] text-sm md:text-base font-bold transition-all flex flex-col items-center justify-center gap-1 min-w-[120px] md:min-w-[140px]",
                         isPreviewMode === "visual"
                           ? "bg-white text-blue-600 shadow-xl"
                           : "text-gray-500 hover:text-gray-700"
                       )}
                     >
-                      <Layout className="w-5 h-5" />
-                      비주얼 미리보기
+                      <Layout className="w-5 h-5 mb-0.5" />
+                      <span className="text-center leading-tight">비주얼<br/>미리보기</span>
                     </button>
                     <button
                       onClick={() => setIsPreviewMode("editor")}
                       className={cn(
-                        "px-8 py-3 rounded-[1.25rem] text-base font-bold transition-all flex items-center gap-2",
+                        "px-6 py-3 rounded-[1.25rem] text-sm md:text-base font-bold transition-all flex flex-col items-center justify-center gap-1 min-w-[120px] md:min-w-[140px]",
                         isPreviewMode === "editor"
                           ? "bg-white text-cyan-600 shadow-xl"
                           : "text-gray-500 hover:text-gray-700"
                       )}
                     >
-                      <FileText className="w-5 h-5" />
-                      RHWP 워드 편집기
+                      <FileText className="w-5 h-5 mb-0.5" />
+                      <span className="text-center leading-tight">RHWP 워드<br/>편집기</span>
                     </button>
                   </div>
                 )}
